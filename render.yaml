@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: master-signal-agent
+    runtime: node
+    region: oregon
+    plan: starter
+    rootDir: .
+    buildCommand: npm install
+    startCommand: node src/master_index.js
+    envVars:
+      - key: TWELVEDATA_API_KEY_MASTER
+        sync: false          # Fill manually in Render dashboard
+      - key: DISCORD_MASTER_WEBHOOK
+        sync: false          # Fill manually in Render dashboard
+      - key: DEBUG_MODE
+        value: false         # Set true only for testing
+      - key: TZ
+        value: UTC
+      - key: NODE_ENV
+        value: production
