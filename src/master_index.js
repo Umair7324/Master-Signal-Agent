@@ -87,12 +87,28 @@ async function runCycle() {
       pairCount++;
 
       if (signals && signals.length > 0) {
+        const pairBias = _pairBias(pair, newsBias);
         for (const sig of signals) {
+
+          // Filter 1: News bias conflict — skip BUY when news is strongly bearish
+          if (sig.action === 'BUY' && ['BEARISH_GOLD', 'BEARISH'].includes(pairBias)) {
+            console.log(`⛔ ${pair} ${sig.action} ${sig.type} — skipped (news bias conflict: ${pairBias})`);
+            await notifier.sendSkip(pair, sig.action, 'Signal skipped — News bias conflict');
+            continue;
+          }
+
+          // Filter 2: RSI + Stoch both zero — no momentum confirmation
+          if (sig.breakdown.rsi === 0 && sig.breakdown.stoch === 0) {
+            console.log(`⛔ ${pair} ${sig.action} ${sig.type} — skipped (RSI=0 and Stoch=0)`);
+            await notifier.sendSkip(pair, sig.action, 'Signal skipped — RSI & Stoch both 0');
+            continue;
+          }
+
           console.log(`✅ SIGNAL: ${pair} ${sig.action} ${sig.type} | Score: ${sig.score}/100 | Entry: ${sig.entry?.toFixed(2)}`);
           stats.signals++;
           monitor.addTrade(sig);
+          await notifier.send([sig]);
         }
-        await notifier.send(signals);
       } else {
         if (DEBUG) console.log(`   ${pair} — no signal`);
       }
@@ -168,6 +184,15 @@ process.on('uncaughtException', (err) => {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function _pairBias(pair, globalBias) {
+  if (pair === 'XAU/USD') return globalBias;
+  if (['EUR/USD', 'GBP/USD'].includes(pair)) {
+    if (globalBias === 'BEARISH_GOLD') return 'BEARISH';
+    if (globalBias === 'BULLISH_GOLD') return 'BULLISH';
+  }
+  return 'NEUTRAL';
 }
 
 start();

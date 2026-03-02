@@ -145,6 +145,35 @@ export class DiscordNotifier {
     return pkt.toISOString().replace('T', ' ').substring(0, 16) + ' PKT';
   }
 
+  async sendSkip(pair, action, reason) {
+    const pairEmoji   = PAIR_EMOJIS[pair] || '📊';
+    const actionEmoji = action === 'BUY' ? '🟢' : '🔴';
+
+    const body = {
+      username: 'Master Signal Agent 🤖',
+      avatar_url: 'https://i.imgur.com/AfFp7pu.png',
+      embeds: [{
+        title: `${pairEmoji} ${pair}  ${actionEmoji} ${action}  ⛔ SKIPPED`,
+        color: 0x607D8B,
+        description: `**${reason}**`,
+        footer: { text: `Master Signal Agent • ${this._getPKT()}` },
+        timestamp: new Date().toISOString()
+      }]
+    };
+
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        timeout: 10000
+      });
+      if (!res.ok) console.error(`Discord skip notify failed: ${res.status}`);
+    } catch (err) {
+      console.error('Discord skip send failed:', err.message);
+    }
+  }
+
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }

@@ -304,4 +304,73 @@ describe('DiscordNotifier', () => {
       await expect(notifier._sendSignal(sig)).rejects.toThrow('Discord webhook failed');
     });
   });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // sendSkip() — signal-skipped notifications
+  // ══════════════════════════════════════════════════════════════════════════
+  describe('sendSkip()', () => {
+    beforeEach(() => {
+      fetchMock.mockResolvedValue({ ok: true });
+    });
+
+    afterEach(() => {
+      fetchMock.mockReset();
+    });
+
+    it('sends a POST to the webhook', async () => {
+      await notifier.sendSkip('XAU/USD', 'BUY', 'Signal skipped — News bias conflict');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [, opts] = fetchMock.mock.calls[0];
+      expect(opts.method).toBe('POST');
+    });
+
+    it('embed uses grey color (0x607D8B)', async () => {
+      let body;
+      fetchMock.mockImplementation(async (_u, opts) => { body = JSON.parse(opts.body); return { ok: true }; });
+      await notifier.sendSkip('XAU/USD', 'BUY', 'Signal skipped — News bias conflict');
+      expect(body.embeds[0].color).toBe(0x607D8B);
+    });
+
+    it('embed title contains pair, action, and SKIPPED', async () => {
+      let body;
+      fetchMock.mockImplementation(async (_u, opts) => { body = JSON.parse(opts.body); return { ok: true }; });
+      await notifier.sendSkip('EUR/USD', 'SELL', 'Signal skipped — RSI & Stoch both 0');
+      const title = body.embeds[0].title;
+      expect(title).toContain('EUR/USD');
+      expect(title).toContain('SELL');
+      expect(title).toContain('SKIPPED');
+    });
+
+    it('embed description contains the skip reason', async () => {
+      let body;
+      fetchMock.mockImplementation(async (_u, opts) => { body = JSON.parse(opts.body); return { ok: true }; });
+      const reason = 'Signal skipped — News bias conflict';
+      await notifier.sendSkip('XAU/USD', 'BUY', reason);
+      expect(body.embeds[0].description).toContain(reason);
+    });
+
+    it('uses 🟢 emoji for BUY in title', async () => {
+      let body;
+      fetchMock.mockImplementation(async (_u, opts) => { body = JSON.parse(opts.body); return { ok: true }; });
+      await notifier.sendSkip('XAU/USD', 'BUY', 'reason');
+      expect(body.embeds[0].title).toContain('🟢');
+    });
+
+    it('uses 🔴 emoji for SELL in title', async () => {
+      let body;
+      fetchMock.mockImplementation(async (_u, opts) => { body = JSON.parse(opts.body); return { ok: true }; });
+      await notifier.sendSkip('GBP/USD', 'SELL', 'reason');
+      expect(body.embeds[0].title).toContain('🔴');
+    });
+
+    it('does not throw when webhook returns non-ok', async () => {
+      fetchMock.mockResolvedValue({ ok: false, status: 500, statusText: 'Error' });
+      await expect(notifier.sendSkip('BTC/USD', 'BUY', 'reason')).resolves.not.toThrow();
+    });
+
+    it('does not throw when fetch rejects', async () => {
+      fetchMock.mockRejectedValue(new Error('Network error'));
+      await expect(notifier.sendSkip('ETH/USD', 'BUY', 'reason')).resolves.not.toThrow();
+    });
+  });
 });
