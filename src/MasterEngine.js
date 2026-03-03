@@ -12,12 +12,14 @@ const API_KEY = process.env.TWELVEDATA_API_KEY_MASTER;
 const BASE_URL = 'https://api.twelvedata.com';
 
 // Pair-specific config
+// minATR5m / minATR1m: minimum ATR required to fire a signal.
+// Protects against stale/frozen API data (e.g. XAU showing ATR 0.16 instead of 3+)
 const PAIR_CONFIG = {
-  'XAU/USD':  { minScore: 68, scalpMinScore: 65, cooldown: 15, intradayCooldown: 60, type: 'forex' },
-  'EUR/USD':  { minScore: 65, scalpMinScore: 62, cooldown: 15, intradayCooldown: 60, type: 'forex' },
-  'GBP/USD':  { minScore: 65, scalpMinScore: 62, cooldown: 15, intradayCooldown: 60, type: 'forex' },
-  'BTC/USD':  { minScore: 65, scalpMinScore: 63, cooldown: 20, intradayCooldown: 60, type: 'crypto' },
-  'ETH/USD':  { minScore: 65, scalpMinScore: 63, cooldown: 20, intradayCooldown: 60, type: 'crypto' },
+  'XAU/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 1.5,      minATR1m: 0.5      },
+  'EUR/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 0.0003,   minATR1m: 0.0001   },
+  'GBP/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 0.0004,   minATR1m: 0.00015  },
+  'BTC/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 20, intradayCooldown: 60, type: 'crypto', minATR5m: 50,       minATR1m: 20       },
+  'ETH/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 20, intradayCooldown: 60, type: 'crypto', minATR5m: 3.0,      minATR1m: 1.0      },
 };
 
 export class MasterEngine {
@@ -71,6 +73,10 @@ export class MasterEngine {
 
         // INTRADAY BUY
         if (buyScore.total >= config.minScore && !this._inCooldown(pair, 'BUY', 'intraday', config.intradayCooldown)) {
+          // ATR guard: reject stale/frozen data
+          if (atr5m < config.minATR5m) {
+            console.log(`⛔ ${pair} BUY INTRADAY — skipped (ATR ${atr5m.toFixed(4)} < min ${config.minATR5m})`);
+          } else {
           const entry = currentPrice;
           const sl = entry - (atr5m * 2.0);
           const tp = entry + (atr5m * 2.0 * 1.8); // RR 1:1.8
@@ -81,11 +87,16 @@ export class MasterEngine {
             macro: macro.trend, atr: atr5m
           });
           this._setCooldown(pair, 'BUY', 'intraday');
+          }
         }
 
         // SCALP BUY (1min entry)
         if (scalp1m.pullbackValid && buyScore.total >= config.scalpMinScore && 
             !this._inCooldown(pair, 'BUY', 'scalp', config.cooldown)) {
+          // ATR guard: reject stale/frozen data
+          if (atr1m < config.minATR1m) {
+            console.log(`⛔ ${pair} BUY SCALP — skipped (ATR1m ${atr1m.toFixed(4)} < min ${config.minATR1m})`);
+          } else {
           const entry = currentPrice;
           const sl = entry - (atr1m * 0.8);
           const tp = entry + (atr1m * 0.8 * 1.5); // RR 1:1.5
@@ -96,6 +107,7 @@ export class MasterEngine {
             macro: macro.trend, atr: atr1m
           });
           this._setCooldown(pair, 'BUY', 'scalp');
+          }
         }
       }
 
@@ -110,6 +122,10 @@ export class MasterEngine {
 
         // INTRADAY SELL
         if (sellScore.total >= config.minScore && !this._inCooldown(pair, 'SELL', 'intraday', config.intradayCooldown)) {
+          // ATR guard: reject stale/frozen data
+          if (atr5m < config.minATR5m) {
+            console.log(`⛔ ${pair} SELL INTRADAY — skipped (ATR ${atr5m.toFixed(4)} < min ${config.minATR5m})`);
+          } else {
           const entry = currentPrice;
           const sl = entry + (atr5m * 2.0);
           const tp = entry - (atr5m * 2.0 * 1.8);
@@ -120,11 +136,16 @@ export class MasterEngine {
             macro: macro.trend, atr: atr5m
           });
           this._setCooldown(pair, 'SELL', 'intraday');
+          }
         }
 
         // SCALP SELL
         if (scalp1m.pullbackValid && sellScore.total >= config.scalpMinScore &&
             !this._inCooldown(pair, 'SELL', 'scalp', config.cooldown)) {
+          // ATR guard: reject stale/frozen data
+          if (atr1m < config.minATR1m) {
+            console.log(`⛔ ${pair} SELL SCALP — skipped (ATR1m ${atr1m.toFixed(4)} < min ${config.minATR1m})`);
+          } else {
           const entry = currentPrice;
           const sl = entry + (atr1m * 0.8);
           const tp = entry - (atr1m * 0.8 * 1.5);
@@ -135,6 +156,7 @@ export class MasterEngine {
             macro: macro.trend, atr: atr1m
           });
           this._setCooldown(pair, 'SELL', 'scalp');
+          }
         }
       }
 
