@@ -11,7 +11,6 @@ import { DiscordNotifier } from './DiscordNotifier.js';
 import { SessionManager }  from './SessionManager.js';
 import { NewsCache }       from './NewsCache.js';
 import { TradeMonitor }    from './TradeMonitor.js';
-import { MT5Trader }       from './MT5Trader.js';
 import http                from 'http';
 
 // ── Config ─────────────────────────────────────────────────────
@@ -32,7 +31,6 @@ const notifier = new DiscordNotifier();
 const session  = new SessionManager();
 const news     = new NewsCache();
 const monitor  = new TradeMonitor();
-const trader   = new MT5Trader();
 
 // ── Stats ──────────────────────────────────────────────────────
 let stats = {
@@ -110,12 +108,6 @@ async function runCycle() {
           stats.signals++;
           monitor.addTrade(sig);
           await notifier.send([sig]);
-
-          // Auto-trade on MT5 if enabled
-          const tradeResult = await trader.executeTrade(sig);
-          if (tradeResult) {
-            await notifier.sendTradeResult(tradeResult);
-          }
         }
       } else {
         if (DEBUG) console.log(`   ${pair} — no signal`);
@@ -152,7 +144,6 @@ function startHealthServer() {
       pairs:      PAIRS,
       session:    session.getSession().name,
       news:       news.getBias(),
-      autoTrade:  trader.getStatus(),
     }));
   }).listen(PORT, () => {
     console.log(`🌐 Health check running on port ${PORT}`);
@@ -185,7 +176,6 @@ async function start() {
   }
 
   startHealthServer();
-  await trader.connect();  // Connect MetaAPI (non-blocking if disabled)
   await runCycle();
   setInterval(runCycle, POLL_INTERVAL_MS);
 }

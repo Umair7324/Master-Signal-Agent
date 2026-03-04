@@ -174,61 +174,6 @@ export class DiscordNotifier {
     }
   }
 
-  // ─── TRADE EXECUTION RESULT ───────────────────────────────────
-  async sendTradeResult(result) {
-    if (!result) return;
-
-    const pairEmoji = PAIR_EMOJIS[result.pair] || '📊';
-
-    let embed;
-
-    if (result.success) {
-      const actionEmoji = result.action === 'BUY' ? '🟢' : '🔴';
-      const fmt = (n) => this._formatPrice(result.pair, n);
-
-      embed = {
-        title: `${pairEmoji} ${result.pair}  ${actionEmoji} ${result.action}  ✅ TRADE PLACED`,
-        color: result.action === 'BUY' ? 0x00C853 : 0xD50000,
-        fields: [
-          { name: '🎫 Ticket',    value: `\`#${result.ticket}\``,         inline: true },
-          { name: '📦 Lots',      value: `\`${result.lots}\``,            inline: true },
-          { name: '📍 Entry',     value: `\`${fmt(result.entry)}\``,      inline: true },
-          { name: '🛑 Stop Loss', value: `\`${fmt(result.sl)}\``,         inline: true },
-          { name: '🎯 TP',        value: `\`${fmt(result.tp)}\``,         inline: true },
-          { name: '📊 Score',     value: `\`${result.score}/100\``,       inline: true },
-        ],
-        footer: { text: `MT5 Auto-Trade • ${this._getPKT()}` },
-        timestamp: new Date().toISOString(),
-      };
-    } else {
-      embed = {
-        title: `${pairEmoji} ${result.pair}  ❌ TRADE FAILED`,
-        color: 0xFF6F00,
-        description: `**Error:** ${result.error}`,
-        footer: { text: `MT5 Auto-Trade • ${this._getPKT()}` },
-        timestamp: new Date().toISOString(),
-      };
-    }
-
-    const body = {
-      username: 'Master Signal Agent 🤖',
-      avatar_url: 'https://i.imgur.com/AfFp7pu.png',
-      embeds: [embed],
-    };
-
-    try {
-      const res = await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        timeout: 10000,
-      });
-      if (!res.ok) console.error(`Discord trade result failed: ${res.status}`);
-    } catch (err) {
-      console.error('Discord trade result send failed:', err.message);
-    }
-  }
-
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
