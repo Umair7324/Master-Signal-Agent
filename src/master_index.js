@@ -11,6 +11,7 @@ import { DiscordNotifier } from './DiscordNotifier.js';
 import { SessionManager }  from './SessionManager.js';
 import { NewsCache }       from './NewsCache.js';
 import { TradeMonitor }    from './TradeMonitor.js';
+import { MT5Trader }       from './MT5Trader.js';
 import http                from 'http';
 
 // ── Config ─────────────────────────────────────────────────────
@@ -31,6 +32,7 @@ const notifier = new DiscordNotifier();
 const session  = new SessionManager();
 const news     = new NewsCache();
 const monitor  = new TradeMonitor();
+const trader   = new MT5Trader();
 
 // ── Stats ──────────────────────────────────────────────────────
 let stats = {
@@ -108,6 +110,12 @@ async function runCycle() {
           stats.signals++;
           monitor.addTrade(sig);
           await notifier.send([sig]);
+
+          // Auto-trade on MT5 if enabled
+          const tradeResult = await trader.executeTrade(sig);
+          if (tradeResult) {
+            await notifier.sendTradeResult(tradeResult);
+          }
         }
       } else {
         if (DEBUG) console.log(`   ${pair} — no signal`);
@@ -144,6 +152,7 @@ function startHealthServer() {
       pairs:      PAIRS,
       session:    session.getSession().name,
       news:       news.getBias(),
+      autoTrade:  trader.getStatus(),
     }));
   }).listen(PORT, () => {
     console.log(`🌐 Health check running on port ${PORT}`);
@@ -159,12 +168,12 @@ async function start() {
   console.log(`📡 Webhook: ${process.env.DISCORD_MASTER_WEBHOOK ? '✅ connected' : '❌ MISSING'}`);
 
   // Count how many API keys are configured
-  const keyCount = [1,2,3,4,5].filter(i => process.env[`TWELVEDATA_API_KEY_${i}`]).length
+  const keyCount = [1,2,3,4,5,6,7,8].filter(i => process.env[`TWELVEDATA_API_KEY_${i}`]).length
     || (process.env.TWELVEDATA_API_KEY_MASTER ? 1 : 0);
   console.log(`🔑 API Keys: ${keyCount > 0 ? `✅ ${keyCount} key(s) loaded` : '❌ MISSING'}`);
   console.log('');
 
-  const hasAnyKey = [1,2,3,4,5].some(i => process.env[`TWELVEDATA_API_KEY_${i}`])
+  const hasAnyKey = [1,2,3,4,5,6,7,8].some(i => process.env[`TWELVEDATA_API_KEY_${i}`])
     || !!process.env.TWELVEDATA_API_KEY_MASTER;
   if (!hasAnyKey) {
     console.error('❌ FATAL: No TwelveData API keys found! Set TWELVEDATA_API_KEY_1 ... _5');
@@ -176,6 +185,7 @@ async function start() {
   }
 
   startHealthServer();
+  await trader.connect();  // Connect MetaAPI (non-blocking if disabled)
   await runCycle();
   setInterval(runCycle, POLL_INTERVAL_MS);
 }

@@ -19,6 +19,9 @@ export class TwelveDataClient {
       process.env.TWELVEDATA_API_KEY_3,
       process.env.TWELVEDATA_API_KEY_4,
       process.env.TWELVEDATA_API_KEY_5,
+      process.env.TWELVEDATA_API_KEY_6,
+      process.env.TWELVEDATA_API_KEY_7,
+      process.env.TWELVEDATA_API_KEY_8,
     ].filter(Boolean);
 
     // Fallback: support old single key env var
