@@ -3,13 +3,10 @@
 // Multi-timeframe: 1H macro → 15min MTF → 5min signal → 1min scalp
 // Confluence scoring 0-100, fires if score >= threshold
 
-import fetch from 'node-fetch';
 import {
   EMA, RSI, ATR, ADX, MACD, Stochastic, BollingerBands, CCI
 } from 'technicalindicators';
-
-const API_KEY = process.env.TWELVEDATA_API_KEY_MASTER;
-const BASE_URL = 'https://api.twelvedata.com';
+import { TwelveDataClient } from './TwelveDataClient.js';
 
 // Pair-specific config
 // minATR5m / minATR1m: minimum ATR required to fire a signal.
@@ -26,6 +23,7 @@ export class MasterEngine {
   constructor() {
     // Cooldown tracking: { "XAU/USD:BUY:scalp": lastSignalTime, ... }
     this.cooldowns = new Map();
+    this.tdClient  = new TwelveDataClient();
   }
 
   // ─── MAIN ENTRY ───────────────────────────────────────────────
@@ -414,23 +412,6 @@ export class MasterEngine {
 
   // ─── TWELVEDATA FETCHER ───────────────────────────────────────
   async _fetchCandles(pair, interval, outputSize = 100) {
-    const symbol = pair.replace('/', '');
-    const url = `${BASE_URL}/time_series?symbol=${encodeURIComponent(pair)}&interval=${interval}&outputsize=${outputSize}&apikey=${API_KEY}`;
-    
-    const res = await fetch(url, { timeout: 15000 });
-    const json = await res.json();
-
-    if (json.status === 'error' || !json.values) {
-      throw new Error(`TwelveData error for ${pair} ${interval}: ${json.message || 'no values'}`);
-    }
-
-    // TwelveData returns newest first — reverse for chronological order
-    return json.values.reverse().map(v => ({
-      open:  parseFloat(v.open),
-      high:  parseFloat(v.high),
-      low:   parseFloat(v.low),
-      close: parseFloat(v.close),
-      time:  v.datetime
-    }));
+    return this.tdClient.fetchCandles(pair, interval, outputSize);
   }
 }

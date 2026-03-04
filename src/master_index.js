@@ -157,11 +157,17 @@ async function start() {
   console.log(`⏱️  Poll interval: every 5 minutes`);
   console.log(`📌 TP/SL Monitor: active (checks every cycle)`);
   console.log(`📡 Webhook: ${process.env.DISCORD_MASTER_WEBHOOK ? '✅ connected' : '❌ MISSING'}`);
-  console.log(`🔑 API Key: ${process.env.TWELVEDATA_API_KEY_MASTER ? '✅ connected' : '❌ MISSING'}`);
+
+  // Count how many API keys are configured
+  const keyCount = [1,2,3,4,5].filter(i => process.env[`TWELVEDATA_API_KEY_${i}`]).length
+    || (process.env.TWELVEDATA_API_KEY_MASTER ? 1 : 0);
+  console.log(`🔑 API Keys: ${keyCount > 0 ? `✅ ${keyCount} key(s) loaded` : '❌ MISSING'}`);
   console.log('');
 
-  if (!process.env.TWELVEDATA_API_KEY_MASTER) {
-    console.error('❌ FATAL: TWELVEDATA_API_KEY_MASTER not set!');
+  const hasAnyKey = [1,2,3,4,5].some(i => process.env[`TWELVEDATA_API_KEY_${i}`])
+    || !!process.env.TWELVEDATA_API_KEY_MASTER;
+  if (!hasAnyKey) {
+    console.error('❌ FATAL: No TwelveData API keys found! Set TWELVEDATA_API_KEY_1 ... _5');
     process.exit(1);
   }
   if (!process.env.DISCORD_MASTER_WEBHOOK) {
