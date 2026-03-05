@@ -1,7 +1,7 @@
 // TwelveDataClient.js
 // Auto-rotating TwelveData API key manager
 // Rotates to next key when daily credit limit is hit
-// Add keys as: TWELVEDATA_API_KEY_1, TWELVEDATA_API_KEY_2, ... TWELVEDATA_API_KEY_5
+// Add keys as: TWELVEDATA_API_KEY_1, TWELVEDATA_API_KEY_2, ... TWELVEDATA_API_KEY_12
 
 import fetch from 'node-fetch';
 
@@ -22,6 +22,10 @@ export class TwelveDataClient {
       process.env.TWELVEDATA_API_KEY_6,
       process.env.TWELVEDATA_API_KEY_7,
       process.env.TWELVEDATA_API_KEY_8,
+      process.env.TWELVEDATA_API_KEY_9,
+      process.env.TWELVEDATA_API_KEY_10,
+      process.env.TWELVEDATA_API_KEY_11,
+      process.env.TWELVEDATA_API_KEY_12,
     ].filter(Boolean);
 
     // Fallback: support old single key env var
@@ -30,7 +34,7 @@ export class TwelveDataClient {
     }
 
     if (this.keys.length === 0) {
-      throw new Error('❌ No TwelveData API keys found! Set TWELVEDATA_API_KEY_1 ... _5 in env');
+      throw new Error('❌ No TwelveData API keys found! Set TWELVEDATA_API_KEY_1 ... _12 in env');
     }
 
     this.currentIndex = 0;         // Active key index
