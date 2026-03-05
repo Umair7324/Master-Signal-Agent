@@ -77,10 +77,10 @@ export class MasterEngine {
           } else {
           const entry = currentPrice;
           const sl = entry - (atr5m * 2.0);
-          const tp = entry + (atr5m * 2.0 * 1.8); // RR 1:1.8
+          const tp = entry + (atr5m * 2.0 * 1.2); // RR 1:1.2
           signals.push({
             pair, action: 'BUY', type: 'INTRADAY',
-            entry, sl, tp, rr: 1.8,
+            entry, sl, tp, rr: 1.2,
             score: buyScore.total, breakdown: buyScore.breakdown,
             macro: macro.trend, atr: atr5m
           });
@@ -126,10 +126,10 @@ export class MasterEngine {
           } else {
           const entry = currentPrice;
           const sl = entry + (atr5m * 2.0);
-          const tp = entry - (atr5m * 2.0 * 1.8);
+          const tp = entry - (atr5m * 2.0 * 1.2);
           signals.push({
             pair, action: 'SELL', type: 'INTRADAY',
-            entry, sl, tp, rr: 1.8,
+            entry, sl, tp, rr: 1.2,
             score: sellScore.total, breakdown: sellScore.breakdown,
             macro: macro.trend, atr: atr5m
           });
