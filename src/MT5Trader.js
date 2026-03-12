@@ -153,6 +153,25 @@ export class MT5Trader {
     }
   }
 
+  // ─── GET LIVE SPREAD ─────────────────────────────────────────
+  // Returns current spread in price units (e.g. 0.30 for XAU/USD)
+  // Returns null if not connected or auto-trade disabled
+  async getSpread(pair) {
+    if (!this.enabled || !this.connected) return null;
+
+    const symbol = SYMBOL_MAP[pair];
+    if (!symbol) return null;
+
+    try {
+      const price = await this.connection.getSymbolPrice(symbol);
+      if (!price || price.ask == null || price.bid == null) return null;
+      return parseFloat((price.ask - price.bid).toFixed(5));
+    } catch (err) {
+      console.warn(`⚠️  MT5Trader: getSpread failed for ${symbol}: ${err.message}`);
+      return null;
+    }
+  }
+
   // ─── STATUS ───────────────────────────────────────────────────
   getStatus() {
     return {

@@ -54,6 +54,9 @@ export class MasterEngine {
       // ── Layer 4: 1min Scalp Entry ─────────────────────────────
       const scalp1m = this._getScalpEntry(candles1m);
 
+      // ── Layer 5: Candle Pattern Detection (5min) ──────────────
+      const patterns = this._getCandlePatterns(candles5m);
+
       const currentPrice = candles1m[candles1m.length - 1].close;
       const atr1m = this._getATR(candles1m, 14);
       const atr5m = this._getATR(candles5m, 14);
@@ -64,7 +67,7 @@ export class MasterEngine {
       if (macro.trend === 'BULLISH') {
         const buyScore = this._scoreSignal({
           action: 'BUY',
-          macro, mtf, signal5m, scalp1m,
+          macro, mtf, signal5m, scalp1m, patterns,
           newsBias: this._newsBiasForPair(pair, newsBias),
           sessionBoost
         });
@@ -113,7 +116,7 @@ export class MasterEngine {
       if (macro.trend === 'BEARISH') {
         const sellScore = this._scoreSignal({
           action: 'SELL',
-          macro, mtf, signal5m, scalp1m,
+          macro, mtf, signal5m, scalp1m, patterns,
           newsBias: this._newsBiasForPair(pair, newsBias),
           sessionBoost
         });
@@ -167,8 +170,9 @@ export class MasterEngine {
   }
 
   // ─── CONFLUENCE SCORING ───────────────────────────────────────
-  // Max score = 100. Min to fire = 65 (scalp) or 68 (intraday)
-  _scoreSignal({ action, macro, mtf, signal5m, scalp1m, newsBias, sessionBoost }) {
+  // Max score = 110 (clamp 100). Min to fire = 75 (intraday) / 72 (scalp)
+  // Candle patterns add up to 10pts — gate-opener for borderline signals
+  _scoreSignal({ action, macro, mtf, signal5m, scalp1m, patterns, newsBias, sessionBoost }) {
     const breakdown = {};
     let total = 0;
 
@@ -243,6 +247,19 @@ export class MasterEngine {
     // 11. Session boost (max 15pts — passed in from SessionManager)
     breakdown.session = Math.min(sessionBoost, 15);
     total += breakdown.session;
+
+    // 12. Candle patterns (max 10pts) ─────────────────────────
+    // Each confirmed pattern adds pts. Multiple patterns stack (capped at 10).
+    // Mismatched pattern penalises score.
+    if (patterns) {
+      const aligned  = action === 'BUY' ? patterns.bullishCount : patterns.bearishCount;
+      const opposing = action === 'BUY' ? patterns.bearishCount : patterns.bullishCount;
+      const patternScore = Math.min(aligned * 5, 10) - (opposing * 3);
+      breakdown.patterns = Math.max(-6, patternScore); // cap downside at -6
+    } else {
+      breakdown.patterns = 0;
+    }
+    total += breakdown.patterns;
 
     // Clamp 0-100
     total = Math.max(0, Math.min(100, total));
@@ -346,6 +363,71 @@ export class MasterEngine {
       cci:      cciVals[cciVals.length - 1]  || 0,
       bbPosition,
       ema9: lastEma9, ema21: lastEma21, price
+    };
+  }
+
+  // ─── CANDLE PATTERN DETECTION (5min) ─────────────────────────
+  // Detects: engulfing, pin bar, CHoCH
+  // Returns { engulfing, pinBar, choch, bullishCount, bearishCount }
+  _getCandlePatterns(candles) {
+    const len = candles.length;
+    if (len < 5) return { bullishCount: 0, bearishCount: 0 };
+
+    const last  = candles[len - 1];
+    const prev  = candles[len - 2];
+    const prev2 = candles[len - 3];
+
+    let bullishCount = 0;
+    let bearishCount = 0;
+
+    // ── Engulfing ──────────────────────────────────────────────
+    // Bullish: prev candle red, last candle green and body engulfs prev body
+    const lastBody = Math.abs(last.close - last.open);
+    const prevBody = Math.abs(prev.close - prev.open);
+    const lastBullish = last.close > last.open;
+    const prevBullish = prev.close > prev.open;
+
+    const bullishEngulf = !prevBullish && lastBullish &&
+                          last.open  <= prev.close &&
+                          last.close >= prev.open  &&
+                          lastBody    > prevBody;
+
+    const bearishEngulf = prevBullish && !lastBullish &&
+                          last.open  >= prev.close &&
+                          last.close <= prev.open  &&
+                          lastBody    > prevBody;
+
+    if (bullishEngulf) bullishCount++;
+    if (bearishEngulf) bearishCount++;
+
+    // ── Pin Bar ────────────────────────────────────────────────
+    // Bullish pin: lower wick >= 2× body, body in upper 40% of candle range
+    const lastRange  = last.high - last.low;
+    const lastLowWick  = Math.min(last.open, last.close) - last.low;
+    const lastHighWick = last.high - Math.max(last.open, last.close);
+
+    if (lastRange > 0) {
+      const bodyRatio = lastBody / lastRange;
+      if (bodyRatio < 0.35) {                        // Small body
+        if (lastLowWick >= lastBody * 2)  bullishCount++; // Long lower wick = bullish rejection
+        if (lastHighWick >= lastBody * 2) bearishCount++; // Long upper wick = bearish rejection
+      }
+    }
+
+    // ── CHoCH (Change of Character) ───────────────────────────
+    // Bullish CHoCH: prev2 and prev were making lower highs, last candle breaks prev high
+    const wasLowerHighs = prev.high < prev2.high;
+    const brokeHighUp   = last.close > prev.high;
+    if (wasLowerHighs && brokeHighUp) bullishCount++;
+
+    // Bearish CHoCH: prev2 and prev were making higher lows, last candle breaks prev low
+    const wasHigherLows = prev.low > prev2.low;
+    const brokeLowDown  = last.close < prev.low;
+    if (wasHigherLows && brokeLowDown) bearishCount++;
+
+    return {
+      bullishEngulf, bearishEngulf,
+      bullishCount, bearishCount,
     };
   }
 

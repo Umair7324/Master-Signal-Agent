@@ -88,6 +88,12 @@ async function runCycle() {
 
       if (signals && signals.length > 0) {
         const pairBias = _pairBias(pair, newsBias);
+
+        // ── Spread Gate ─────────────────────────────────────────
+        // NOTE: Live spread check requires MT5 connection.
+        // When MT5 is disabled, spread guard is skipped — filter manually
+        // via Discord signal review before entering trades.
+
         for (const sig of signals) {
 
           // Filter 1: News bias conflict — skip BUY when news is strongly bearish
