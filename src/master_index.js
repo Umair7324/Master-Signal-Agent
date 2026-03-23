@@ -12,6 +12,11 @@ import { SessionManager }  from './SessionManager.js';
 import { NewsCache }       from './NewsCache.js';
 import { TradeMonitor }    from './TradeMonitor.js';
 import http                from 'http';
+import { createRequire }   from 'module';
+
+// ── NexusOS SDK (CommonJS → ESM bridge) ───────────────────────
+const _require   = createRequire(import.meta.url);
+const { NexusAgent } = _require('nexusos-sdk');
 
 // ── Config ─────────────────────────────────────────────────────
 const PAIRS = [
@@ -32,6 +37,17 @@ const session  = new SessionManager();
 const news     = new NewsCache();
 const monitor  = new TradeMonitor();
 
+// ── NexusOS Agent ──────────────────────────────────────────────
+let nexus = null;
+if (process.env.NEXUSOS_AGENT_SECRET && process.env.NEXUSOS_AGENT_ID) {
+  nexus = new NexusAgent({
+    apiKey:        process.env.NEXUSOS_AGENT_SECRET,
+    agentId:       process.env.NEXUSOS_AGENT_ID,
+    batchSize:     5,
+    flushInterval: 10000,
+  });
+}
+
 // ── Stats ──────────────────────────────────────────────────────
 let stats = {
   cycles:    0,
@@ -45,6 +61,9 @@ async function runCycle() {
   const cycleTime = new Date().toISOString();
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`[${cycleTime}] 🔄 Cycle #${stats.cycles}`);
+
+  // NexusOS — heartbeat at the start of every cycle
+  if (nexus) await nexus.heartbeat();
 
   // 1. Check open trades FIRST (cheap — 1 price call per pair)
   if (monitor.openTrades.size > 0) {
@@ -114,6 +133,17 @@ async function runCycle() {
           stats.signals++;
           monitor.addTrade(sig);
           await notifier.send([sig]);
+
+          // NexusOS — log each fired signal as an action
+          if (nexus) {
+            await nexus.logAction({
+              tool:      'signal_engine',
+              input:     { pair, action: sig.action, type: sig.type, score: sig.score },
+              output:    { entry: sig.entry, sl: sig.sl, tp: sig.tp, rr: sig.rr },
+              durationMs: 0,
+              success:   true,
+            });
+          }
         }
       } else {
         if (DEBUG) console.log(`   ${pair} — no signal`);
@@ -124,6 +154,18 @@ async function runCycle() {
     } catch (err) {
       console.error(`❌ ${pair} error: ${err.message}`);
       pairCount++; // Still count so rate limit logic stays correct
+
+      // NexusOS — log the error as a failed action
+      if (nexus) {
+        await nexus.logAction({
+          tool:         'signal_engine',
+          input:        { pair },
+          output:       null,
+          durationMs:   0,
+          success:      false,
+          errorMessage: err.message,
+        });
+      }
     }
   }
 
@@ -168,6 +210,7 @@ async function start() {
   const keyCount = [1,2,3,4,5,6,7,8].filter(i => process.env[`TWELVEDATA_API_KEY_${i}`]).length
     || (process.env.TWELVEDATA_API_KEY_MASTER ? 1 : 0);
   console.log(`🔑 API Keys: ${keyCount > 0 ? `✅ ${keyCount} key(s) loaded` : '❌ MISSING'}`);
+  console.log(`🛡️  NexusOS: ${nexus ? `✅ monitoring (${process.env.NEXUSOS_AGENT_ID})` : '⚠️  disabled (no credentials)'}`);
   console.log('');
 
   const hasAnyKey = [1,2,3,4,5,6,7,8].some(i => process.env[`TWELVEDATA_API_KEY_${i}`])
