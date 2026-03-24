@@ -25,11 +25,11 @@ export class DiscordNotifier {
 
   async send(signals) {
     if (!signals || signals.length === 0) return;
-    
+
     for (const signal of signals) {
       try {
         await this._sendSignal(signal);
-        await this._sleep(500); // Small delay between signals
+        await this._sleep(1500); // Respect Discord rate limit (max ~30 req/min per webhook)
       } catch (err) {
         console.error('Discord send failed:', err.message);
       }
@@ -102,16 +102,7 @@ export class DiscordNotifier {
       embeds: [embed]
     };
 
-    const res = await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      timeout: 10000
-    });
-
-    if (!res.ok) {
-      throw new Error(`Discord webhook failed: ${res.status} ${res.statusText}`);
-    }
+    await this._postWithRetry(body);
   }
 
   // Visual score bar: ████████░░ 82/100
@@ -162,16 +153,43 @@ export class DiscordNotifier {
     };
 
     try {
+      await this._postWithRetry(body);
+    } catch (err) {
+      console.error('Discord skip send failed:', err.message);
+    }
+  }
+
+  // POST to Discord webhook with automatic 429 retry-after handling
+  async _postWithRetry(body, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       const res = await fetch(WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         timeout: 10000
       });
-      if (!res.ok) console.error(`Discord skip notify failed: ${res.status}`);
-    } catch (err) {
-      console.error('Discord skip send failed:', err.message);
+
+      if (res.ok) return; // Success
+
+      if (res.status === 429) {
+        // Discord rate limit — read retry_after and wait
+        let waitMs = 5000; // fallback 5s
+        try {
+          const json = await res.json();
+          // retry_after is in seconds (can be a float)
+          if (json.retry_after) waitMs = Math.ceil(json.retry_after * 1000) + 200;
+        } catch (_) { /* ignore parse errors */ }
+
+        console.warn(`Discord rate limited (429). Waiting ${waitMs}ms before retry ${attempt}/${maxRetries}...`);
+        await this._sleep(waitMs);
+        continue; // retry
+      }
+
+      // Any other non-OK status — throw immediately
+      throw new Error(`Discord webhook failed: ${res.status} ${res.statusText}`);
     }
+
+    throw new Error(`Discord webhook failed after ${maxRetries} retries (rate limit)`);
   }
 
   _sleep(ms) {
