@@ -1,8 +1,6 @@
 // DiscordNotifier.js
 // Sends rich Discord embeds for each signal with full breakdown
 
-import fetch from 'node-fetch';
-
 const WEBHOOK_URL = process.env.DISCORD_MASTER_WEBHOOK;
 
 // Colour codes per action

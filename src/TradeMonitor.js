@@ -2,8 +2,6 @@
 // Tracks all open signals after they fire
 // Every poll cycle → checks live price → pings Discord when TP or SL hit
 
-import fetch from 'node-fetch';
-
 const WEBHOOK_URL = process.env.DISCORD_MASTER_WEBHOOK;
 const API_KEY     = process.env.TWELVEDATA_API_KEY_MASTER;
 const BASE_URL    = 'https://api.twelvedata.com';
