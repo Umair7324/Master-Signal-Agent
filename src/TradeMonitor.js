@@ -174,25 +174,33 @@ export class TradeMonitor {
   }
 
   // POST to Discord webhook with automatic 429 retry-after handling
-  async _postWithRetry(body, maxRetries = 3) {
+  async _postWithRetry(body, maxRetries = 5) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      const res = await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        timeout: 10000
-      });
+      let res;
+      try {
+        res = await fetch(WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(10000)
+        });
+      } catch (err) {
+        console.warn(`[Monitor] Discord fetch error (attempt ${attempt}/${maxRetries}): ${err.message}`);
+        await this._sleep(5000 * attempt);
+        continue;
+      }
 
       if (res.ok) return; // Success
 
       if (res.status === 429) {
         // Discord rate limit — read retry_after and wait
-        let waitMs = 5000; // fallback 5s
+        let waitMs = 30000; // fallback 30s
         try {
-          const json = await res.json();
-          // retry_after is in seconds (can be a float)
-          if (json.retry_after) waitMs = Math.ceil(json.retry_after * 1000) + 200;
-        } catch (_) { /* ignore parse errors */ }
+          const text = await res.text();
+          console.warn(`[Monitor] Discord 429 raw response: ${text.substring(0, 200)}`);
+          const json = JSON.parse(text);
+          if (json.retry_after) waitMs = Math.ceil(json.retry_after * 1000) + 500;
+        } catch (_) { /* ignore parse errors, use fallback */ }
 
         console.warn(`[Monitor] Discord rate limited (429). Waiting ${waitMs}ms before retry ${attempt}/${maxRetries}...`);
         await this._sleep(waitMs);

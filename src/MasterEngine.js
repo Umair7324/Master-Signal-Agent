@@ -43,7 +43,10 @@ export class MasterEngine {
 
       // ── Layer 1: 1H Macro ──────────────────────────────────────
       const macro = this._getMacro(candles1H);
-      if (macro.trend === 'NEUTRAL') return null; // No clear trend = no signal
+      if (macro.trend === 'NEUTRAL') {
+        console.log(`   ${pair} — no signal (macro NEUTRAL, ADX: ${macro.adx.toFixed(1)}, EMA21: ${macro.ema21?.toFixed(2)}, EMA50: ${macro.ema50?.toFixed(2)})`);
+        return null;
+      }
 
       // ── Layer 2: 15min MTF ────────────────────────────────────
       const mtf = this._getMTF(candles15m);
@@ -283,7 +286,7 @@ export class MasterEngine {
     const lastAdx   = adxVals[adxVals.length - 1]?.adx || 0;
 
     let trend = 'NEUTRAL';
-    if (lastAdx >= 20) {
+    if (lastAdx >= 17) {
       if (lastEma21 > lastEma50 && lastPrice > lastEma21) trend = 'BULLISH';
       else if (lastEma21 < lastEma50 && lastPrice < lastEma21) trend = 'BEARISH';
     }
