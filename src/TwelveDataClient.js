@@ -3,8 +3,6 @@
 // Rotates to next key when daily credit limit is hit
 // Add keys as: TWELVEDATA_API_KEY_1, TWELVEDATA_API_KEY_2, ... TWELVEDATA_API_KEY_12
 
-import fetch from 'node-fetch';
-
 const BASE_URL = 'https://api.twelvedata.com';
 
 // Matches TwelveData's daily credit exhaustion error message
@@ -58,7 +56,7 @@ export class TwelveDataClient {
       const url = `${BASE_URL}/time_series?symbol=${encodeURIComponent(pair)}&interval=${interval}&outputsize=${outputSize}&apikey=${key}`;
 
       try {
-        const res  = await fetch(url, { timeout: 15000 });
+        const res  = await fetch(url, { signal: AbortSignal.timeout(15000) });
         const json = await res.json();
 
         // Daily credit exhausted → rotate key and retry
