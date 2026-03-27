@@ -31,22 +31,17 @@ export class MasterEngine {
     const signals = [];
 
     try {
-      // Fetch all timeframes in parallel
-      const [candles1H, candles15m, candles5m, candles1m] = await Promise.all([
-        this._fetchCandles(pair, '1h',  100),
-        this._fetchCandles(pair, '15min', 100),
-        this._fetchCandles(pair, '5min',  100),
-        this._fetchCandles(pair, '1min',  50),
-      ]);
+      // Fetch timeframes sequentially — 500ms gap prevents burst on TwelveData rate limiter
+      const candles1H  = await this._fetchCandles(pair, '1h',    100); await this._sleep(500);
+      const candles15m = await this._fetchCandles(pair, '15min', 100); await this._sleep(500);
+      const candles5m  = await this._fetchCandles(pair, '5min',  100); await this._sleep(500);
+      const candles1m  = await this._fetchCandles(pair, '1min',   50);
 
       if (!candles1H || !candles15m || !candles5m || !candles1m) return null;
 
       // ── Layer 1: 1H Macro ──────────────────────────────────────
       const macro = this._getMacro(candles1H);
-      if (macro.trend === 'NEUTRAL') {
-        console.log(`   ${pair} — no signal (macro NEUTRAL, ADX: ${macro.adx.toFixed(1)}, EMA21: ${macro.ema21?.toFixed(2)}, EMA50: ${macro.ema50?.toFixed(2)})`);
-        return null;
-      }
+      if (macro.trend === 'NEUTRAL') return null; // No clear trend = no signal
 
       // ── Layer 2: 15min MTF ────────────────────────────────────
       const mtf = this._getMTF(candles15m);
@@ -286,7 +281,7 @@ export class MasterEngine {
     const lastAdx   = adxVals[adxVals.length - 1]?.adx || 0;
 
     let trend = 'NEUTRAL';
-    if (lastAdx >= 17) {
+    if (lastAdx >= 20) {
       if (lastEma21 > lastEma50 && lastPrice > lastEma21) trend = 'BULLISH';
       else if (lastEma21 < lastEma50 && lastPrice < lastEma21) trend = 'BEARISH';
     }
@@ -498,5 +493,9 @@ export class MasterEngine {
   // ─── TWELVEDATA FETCHER ───────────────────────────────────────
   async _fetchCandles(pair, interval, outputSize = 100) {
     return this.tdClient.fetchCandles(pair, interval, outputSize);
+  }
+
+  _sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
