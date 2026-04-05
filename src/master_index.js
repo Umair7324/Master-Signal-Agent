@@ -17,7 +17,7 @@ import http                from 'http';
 const PAIRS = [
   'XAU/USD',
   'EUR/USD',
-  'GBP/USD',
+  // 'GBP/USD' removed — 35.5% WR, -0.225R EV, 9.1% WR in Asian session
   'BTC/USD',
   'ETH/USD',
 ];
@@ -74,6 +74,18 @@ async function runCycle() {
       continue;
     }
 
+    // ── Session-based pair guards (backtest-driven) ──────────────
+    // ETH/USD + EUR/USD in Asian session (sess=5, 00:00–07:00 UTC): <30% WR
+    if (['ETH/USD', 'EUR/USD'].includes(pair) && currentSession.name === 'Asian') {
+      console.log(`⛔ ${pair} — blocked (Asian session, <30% WR)`);
+      continue;
+    }
+    // XAU/USD in London session (sess=10, 09:30–12:00 UTC): 29.6% WR
+    if (pair === 'XAU/USD' && currentSession.name === 'London') {
+      console.log(`⛔ XAU/USD — blocked (London session 09:30–12:00 UTC, 29.6% WR)`);
+      continue;
+    }
+
     // Pause after every 2 pairs to reset the per-minute credit window
     if (pairCount > 0 && pairCount % 2 === 0) {
       console.log(`⏳ Rate limit pause (65s) before ${pair}...`);
@@ -107,6 +119,18 @@ async function runCycle() {
           if (sig.breakdown.rsi === 0 && sig.breakdown.stoch === 0) {
             console.log(`⛔ ${pair} ${sig.action} ${sig.type} — skipped (RSI=0 and Stoch=0)`);
             await notifier.sendSkip(pair, sig.action, 'Signal skipped — RSI & Stoch both 0');
+            continue;
+          }
+
+          // Filter 3: EUR/USD INTRADAY — 39.8% WR, -0.112R EV (backtest data)
+          if (pair === 'EUR/USD' && sig.type === 'INTRADAY') {
+            console.log(`⛔ EUR/USD INTRADAY — blocked (39.8% WR, negative EV)`);
+            continue;
+          }
+
+          // Filter 4: Ghost signal guard — drop if missing score or entry price
+          if (!sig.score || !sig.entry) {
+            console.warn(`⚠️  ${pair} ${sig.action} ${sig.type} — dropped (missing score or entry, not sent to Discord)`);
             continue;
           }
 

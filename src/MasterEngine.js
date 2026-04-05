@@ -12,11 +12,11 @@ import { TwelveDataClient } from './TwelveDataClient.js';
 // minATR5m / minATR1m: minimum ATR required to fire a signal.
 // Protects against stale/frozen API data (e.g. XAU showing ATR 0.16 instead of 3+)
 const PAIR_CONFIG = {
-  'XAU/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 1.5,      minATR1m: 0.5      },
-  'EUR/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 0.0003,   minATR1m: 0.0001   },
-  'GBP/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 0.0004,   minATR1m: 0.00015  },
-  'BTC/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 20, intradayCooldown: 60, type: 'crypto', minATR5m: 50,       minATR1m: 20       },
-  'ETH/USD':  { minScore: 75, scalpMinScore: 72, cooldown: 20, intradayCooldown: 60, type: 'crypto', minATR5m: 3.0,      minATR1m: 1.0      },
+  'XAU/USD':  { minScore: 82, scalpMinScore: 82, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 1.5,      minATR1m: 0.5      },
+  'EUR/USD':  { minScore: 82, scalpMinScore: 82, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 0.0003,   minATR1m: 0.0001   },
+  'GBP/USD':  { minScore: 82, scalpMinScore: 82, cooldown: 15, intradayCooldown: 60, type: 'forex',  minATR5m: 0.0004,   minATR1m: 0.00015  },
+  'BTC/USD':  { minScore: 82, scalpMinScore: 82, cooldown: 20, intradayCooldown: 60, type: 'crypto', minATR5m: 50,       minATR1m: 20       },
+  'ETH/USD':  { minScore: 82, scalpMinScore: 82, cooldown: 20, intradayCooldown: 60, type: 'crypto', minATR5m: 3.0,      minATR1m: 1.0      },
 };
 
 export class MasterEngine {
