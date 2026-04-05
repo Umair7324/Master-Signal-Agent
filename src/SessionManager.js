@@ -1,9 +1,21 @@
-// SessionManager.js
+// SessionManager.js — v2 (Apr 5 2026 audit rewrite)
 // Detects current market session and returns boost multiplier for signal scoring
+//
+// CHANGELOG v2:
+// Session boosts rebalanced based on actual WR data (1,097 closed signals):
+//   Session          Old Boost  WR      New Boost  Rationale
+//   ─────────────────────────────────────────────────────────
+//   London Open       +15      49.4%    +10        Best session, still top boost
+//   London-NY Overlap +15      46.7%    +8         Was over-boosted vs its WR
+//   London            +10      45.1%    +6         Mediocre WR, reduced
+//   NY                +8       (est)    +4         Average session
+//   Asian             +5       42.9%    +2         Below avg, signals need stronger TA
+//   Off-Hours         +0       41.4%    +0         Unchanged
+//
+// Max session boost now +10 (was +15). MasterEngine caps at 10.
 
 export class SessionManager {
-  
-  // Returns session info based on current UTC hour
+
   getSession() {
     const utcHour = new Date().getUTCHours();
     const utcMin = new Date().getUTCMinutes();
@@ -14,9 +26,9 @@ export class SessionManager {
       return {
         name: 'Asian',
         emoji: '🌏',
-        boost: 5,          // Least volatile for forex, ok for crypto
+        boost: 2,          // was 5. Below-avg WR (42.9%), signals need stronger technicals
         active: true,
-        description: 'Asian Session — Lower volatility, good for crypto'
+        description: 'Asian Session — Lower volatility, signals need stronger confluence'
       };
     }
 
@@ -25,9 +37,9 @@ export class SessionManager {
       return {
         name: 'London Open',
         emoji: '🇬🇧',
-        boost: 15,         // Highest volatility = strongest signals
+        boost: 10,         // was 15. Best session (49.4% WR), still gets top boost
         active: true,
-        description: 'London Open — Highest momentum, premium signals'
+        description: 'London Open — Highest momentum, best session by WR'
       };
     }
 
@@ -36,20 +48,20 @@ export class SessionManager {
       return {
         name: 'London',
         emoji: '🏦',
-        boost: 10,
+        boost: 6,          // was 10. Mediocre WR (45.1%)
         active: true,
-        description: 'London Session — Strong directional moves'
+        description: 'London Session — Moderate directional moves'
       };
     }
 
-    // London-NY Overlap: 12:00 – 16:00 UTC (2nd most volatile)
+    // London-NY Overlap: 12:00 – 16:00 UTC
     if (timeDecimal >= 12 && timeDecimal < 16) {
       return {
         name: 'London-NY Overlap',
         emoji: '🔥',
-        boost: 15,
+        boost: 8,          // was 15. Good but not as good as London Open (46.7% WR)
         active: true,
-        description: 'London-NY Overlap — Maximum liquidity, best signals'
+        description: 'London-NY Overlap — High liquidity, strong signals'
       };
     }
 
@@ -58,35 +70,32 @@ export class SessionManager {
       return {
         name: 'NY',
         emoji: '🗽',
-        boost: 8,
+        boost: 4,          // was 8. Average session
         active: true,
-        description: 'NY Session — Solid momentum'
+        description: 'NY Session — Moderate momentum'
       };
     }
 
-    // Off-hours: 21:00 – 00:00 UTC (forex only, crypto still active)
+    // Off-hours: 21:00 – 00:00 UTC
     return {
       name: 'Off-Hours',
       emoji: '🌙',
-      boost: 0,
-      active: false,        // For forex pairs — still valid for crypto
+      boost: 0,            // unchanged
+      active: false,
       description: 'Off-Hours — Low liquidity for forex'
     };
   }
 
-  // Crypto pairs always active (24/7)
   isForexPair(pair) {
-    return ['XAU/USD', 'EUR/USD', 'GBP/USD'].includes(pair);
+    return ['XAU/USD', 'EUR/USD'].includes(pair);  // GBP/USD removed from system
   }
 
-  // Should this pair be analyzed right now?
   shouldAnalyze(pair) {
-    if (!this.isForexPair(pair)) return true; // BTC/ETH always on
+    if (!this.isForexPair(pair)) return true;
     const session = this.getSession();
     return session.active;
   }
 
-  // Get PKT time string for Discord display
   getPKTTime() {
     const now = new Date();
     const pkt = new Date(now.getTime() + 5 * 60 * 60 * 1000);

@@ -1,7 +1,7 @@
 // master_index.js
 // Master Signal Agent — Main Entry Point
 // Runs 24/7 (Render Web Service), polls every 5 minutes
-// Covers: XAU/USD, EUR/USD, GBP/USD, BTC/USD, ETH/USD
+// Covers: XAU/USD, EUR/USD (SCALP only), BTC/USD, ETH/USD
 // Signals: BUY + SELL | SCALP + INTRADAY
 // TP/SL Monitor: pings Discord when trade closes
 
@@ -224,7 +224,7 @@ function sleep(ms) {
 
 function _pairBias(pair, globalBias) {
   if (pair === 'XAU/USD') return globalBias;
-  if (['EUR/USD', 'GBP/USD'].includes(pair)) {
+  if (pair === 'EUR/USD') {
     if (globalBias === 'BEARISH_GOLD') return 'BEARISH';
     if (globalBias === 'BULLISH_GOLD') return 'BULLISH';
   }
