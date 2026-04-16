@@ -60,7 +60,8 @@ export class RejectionLogger {
     // 1. Console output (grep-able)
     if (this.consoleOutput) {
       const scoreStr = score !== null ? `${score}/${minScore ?? '-'}` : '-';
-      console.log(`|REJECT| ${pair} ${action} ${type} score=${scoreStr} reason="${reason}"`);
+      const notesStr = notes ? ` notes="${notes}"` : '';
+      console.log(`|REJECT| ${pair} ${action} ${type} score=${scoreStr} reason="${reason}"${notesStr}`);
     }
 
     // 2. Local CSV
