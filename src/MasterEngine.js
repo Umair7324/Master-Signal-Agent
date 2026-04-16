@@ -1,48 +1,54 @@
-// MasterEngine.js — v2 (Apr 5 2026 audit rewrite)
+// MasterEngine.js — v3 (Apr 16 2026 calibration fix)
 // Core signal engine — analyzes all pairs, both BUY and SELL
 // Multi-timeframe: 1H macro → 15min MTF → 5min signal → 1min scalp
 // Confluence scoring 0-100, fires if score >= threshold
 //
-// CHANGELOG v2:
-// - Removed GBP/USD (35.8% WR — worst pair across every dimension)
-// - Blocked EUR/USD INTRADAY (39.8% WR — only SCALP allowed, raised minScore to 68)
-// - Disabled XAU/USD SCALP (41.9% WR vs 54.5% INTRADAY — gold eats tight stops)
-// - Redesigned _scoreSignal(): removed dead-weight macro +20, killed CCI/BB freebies,
-//   flattened MTF, added SELL direction bias, capped session boost
-// - New threshold: 62 (calibrated for new ~85pt max budget)
-// - CCI removed from scoring (was free +4, always passed)
+// CHANGELOG v3 (Apr 16 2026):
+// - Threshold recalibrated: 62→52 (XAU/BTC/ETH), 68→58 (EUR)
+//   Why: data simulation showed 62/85 (73% of max) was stricter than
+//   v1's 82/117 (70% of max). At threshold 52, simulation gave
+//   3.19 signals/day, 58.5% WR, +0.286R EV — sweet spot per threshold sweep.
+// - Rejection logging: every attempted score/filter decision is logged
+//   with full breakdown so we can diagnose calibration without guessing.
+// - Binance fallback: BTC/ETH routed to Binance (data-api.binance.vision)
+//   since TwelveData free plan dropped ETH/USD 1h support.
+//
+// CHANGELOG v2 (Apr 5 2026):
+// - Removed GBP/USD, blocked EUR INTRADAY, disabled XAU SCALP
+// - Redesigned _scoreSignal(): removed dead-weight macro +20, killed
+//   CCI/BB freebies, flattened MTF, added SELL direction bias.
 
 import {
   EMA, RSI, ATR, ADX, MACD, Stochastic, BollingerBands
 } from 'technicalindicators';
 import { TwelveDataClient } from './TwelveDataClient.js';
+import { BinanceClient }    from './BinanceClient.js';
 
 // ─── PAIR CONFIG ──────────────────────────────────────────────────
-// GBP/USD: REMOVED — 35.8% WR, unsalvageable (9.1% WR in Asian, max 9 consecutive SLs)
-// EUR/USD: INTRADAY blocked, SCALP only, minScore raised to 68
-// XAU/USD: SCALP disabled — 41.9% WR vs 54.5% INTRADAY
+// v3: thresholds lowered to 52 (crypto/XAU) and 58 (EUR)
+//     calibrated from threshold sweep against 1,097-signal dataset.
 const PAIR_CONFIG = {
   'XAU/USD': {
-    minScore: 62, scalpMinScore: 62, cooldown: 15, intradayCooldown: 60,
+    minScore: 52, scalpMinScore: 52, cooldown: 15, intradayCooldown: 60,
     type: 'forex', minATR5m: 1.5, minATR1m: 0.5,
-    scalpEnabled: false,        // XAU SCALP killed — 41.9% WR
+    scalpEnabled: false,        // XAU SCALP killed — 41.9% WR, 12.5% in London
     intradayEnabled: true,
   },
   'EUR/USD': {
-    minScore: 68, scalpMinScore: 68, cooldown: 15, intradayCooldown: 60,
+    minScore: 58, scalpMinScore: 58, cooldown: 15, intradayCooldown: 60,
     type: 'forex', minATR5m: 0.0003, minATR1m: 0.0001,
     scalpEnabled: true,
     intradayEnabled: false,     // EUR INTRADAY killed — 39.8% WR
   },
   // GBP/USD: REMOVED
   'BTC/USD': {
-    minScore: 62, scalpMinScore: 62, cooldown: 20, intradayCooldown: 60,
+    minScore: 52, scalpMinScore: 52, cooldown: 20, intradayCooldown: 60,
     type: 'crypto', minATR5m: 50, minATR1m: 20,
     scalpEnabled: true,
     intradayEnabled: true,
   },
   'ETH/USD': {
-    minScore: 62, scalpMinScore: 62, cooldown: 20, intradayCooldown: 60,
+    minScore: 52, scalpMinScore: 52, cooldown: 20, intradayCooldown: 60,
     type: 'crypto', minATR5m: 3.0, minATR1m: 1.0,
     scalpEnabled: true,
     intradayEnabled: true,
@@ -50,9 +56,11 @@ const PAIR_CONFIG = {
 };
 
 export class MasterEngine {
-  constructor() {
-    this.cooldowns = new Map();
-    this.tdClient  = new TwelveDataClient();
+  constructor(opts = {}) {
+    this.cooldowns    = new Map();
+    this.tdClient     = new TwelveDataClient();
+    this.binanceClient = new BinanceClient();
+    this.logger       = opts.logger || null;   // RejectionLogger, optional
   }
 
   // ─── MAIN ENTRY ───────────────────────────────────────────────
@@ -75,7 +83,11 @@ export class MasterEngine {
 
       // ── Layer 1: 1H Macro ──────────────────────────────────────
       const macro = this._getMacro(candles1H);
-      if (macro.trend === 'NEUTRAL') return null;
+      if (macro.trend === 'NEUTRAL') {
+        this._rejectLog({ pair, reason: 'macro_neutral', macroTrend: 'NEUTRAL',
+                          notes: `adx=${macro.adx?.toFixed(1)}` });
+        return null;
+      }
 
       // ── Layer 2: 15min MTF ────────────────────────────────────
       const mtf = this._getMTF(candles15m);
@@ -103,11 +115,26 @@ export class MasterEngine {
         });
 
         // INTRADAY BUY — gated by intradayEnabled
-        if (config.intradayEnabled &&
-            buyScore.total >= config.minScore &&
-            !this._inCooldown(pair, 'BUY', 'intraday', config.intradayCooldown)) {
-          if (atr5m < config.minATR5m) {
-            console.log(`⛔ ${pair} BUY INTRADAY — skipped (ATR ${atr5m.toFixed(4)} < min ${config.minATR5m})`);
+        if (config.intradayEnabled) {
+          if (buyScore.total < config.minScore) {
+            this._rejectLog({ pair, action: 'BUY', type: 'INTRADAY',
+                              score: buyScore.total, minScore: config.minScore,
+                              reason: 'below_threshold',
+                              breakdown: buyScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (this._inCooldown(pair, 'BUY', 'intraday', config.intradayCooldown)) {
+            this._rejectLog({ pair, action: 'BUY', type: 'INTRADAY',
+                              score: buyScore.total, minScore: config.minScore,
+                              reason: 'cooldown',
+                              breakdown: buyScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (atr5m < config.minATR5m) {
+            this._rejectLog({ pair, action: 'BUY', type: 'INTRADAY',
+                              score: buyScore.total, minScore: config.minScore,
+                              reason: 'atr_too_low',
+                              notes: `atr5m=${atr5m.toFixed(4)} < min=${config.minATR5m}`,
+                              breakdown: buyScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
           } else {
             const entry = currentPrice;
             const sl = entry - (atr5m * 2.0);
@@ -123,12 +150,29 @@ export class MasterEngine {
         }
 
         // SCALP BUY — gated by scalpEnabled
-        if (config.scalpEnabled &&
-            scalp1m.pullbackValid &&
-            buyScore.total >= config.scalpMinScore &&
-            !this._inCooldown(pair, 'BUY', 'scalp', config.cooldown)) {
-          if (atr1m < config.minATR1m) {
-            console.log(`⛔ ${pair} BUY SCALP — skipped (ATR1m ${atr1m.toFixed(4)} < min ${config.minATR1m})`);
+        if (config.scalpEnabled) {
+          if (!scalp1m.pullbackValid) {
+            // Silent — pullback check is the primary scalp trigger, not
+            // really a "rejection" worth logging every cycle.
+          } else if (buyScore.total < config.scalpMinScore) {
+            this._rejectLog({ pair, action: 'BUY', type: 'SCALP',
+                              score: buyScore.total, minScore: config.scalpMinScore,
+                              reason: 'below_threshold',
+                              breakdown: buyScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (this._inCooldown(pair, 'BUY', 'scalp', config.cooldown)) {
+            this._rejectLog({ pair, action: 'BUY', type: 'SCALP',
+                              score: buyScore.total, minScore: config.scalpMinScore,
+                              reason: 'cooldown',
+                              breakdown: buyScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (atr1m < config.minATR1m) {
+            this._rejectLog({ pair, action: 'BUY', type: 'SCALP',
+                              score: buyScore.total, minScore: config.scalpMinScore,
+                              reason: 'atr_too_low',
+                              notes: `atr1m=${atr1m.toFixed(4)} < min=${config.minATR1m}`,
+                              breakdown: buyScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
           } else {
             const entry = currentPrice;
             const sl = entry - (atr1m * 0.8);
@@ -154,11 +198,26 @@ export class MasterEngine {
         });
 
         // INTRADAY SELL — gated by intradayEnabled
-        if (config.intradayEnabled &&
-            sellScore.total >= config.minScore &&
-            !this._inCooldown(pair, 'SELL', 'intraday', config.intradayCooldown)) {
-          if (atr5m < config.minATR5m) {
-            console.log(`⛔ ${pair} SELL INTRADAY — skipped (ATR ${atr5m.toFixed(4)} < min ${config.minATR5m})`);
+        if (config.intradayEnabled) {
+          if (sellScore.total < config.minScore) {
+            this._rejectLog({ pair, action: 'SELL', type: 'INTRADAY',
+                              score: sellScore.total, minScore: config.minScore,
+                              reason: 'below_threshold',
+                              breakdown: sellScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (this._inCooldown(pair, 'SELL', 'intraday', config.intradayCooldown)) {
+            this._rejectLog({ pair, action: 'SELL', type: 'INTRADAY',
+                              score: sellScore.total, minScore: config.minScore,
+                              reason: 'cooldown',
+                              breakdown: sellScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (atr5m < config.minATR5m) {
+            this._rejectLog({ pair, action: 'SELL', type: 'INTRADAY',
+                              score: sellScore.total, minScore: config.minScore,
+                              reason: 'atr_too_low',
+                              notes: `atr5m=${atr5m.toFixed(4)} < min=${config.minATR5m}`,
+                              breakdown: sellScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
           } else {
             const entry = currentPrice;
             const sl = entry + (atr5m * 2.0);
@@ -174,12 +233,28 @@ export class MasterEngine {
         }
 
         // SCALP SELL — gated by scalpEnabled
-        if (config.scalpEnabled &&
-            scalp1m.pullbackValid &&
-            sellScore.total >= config.scalpMinScore &&
-            !this._inCooldown(pair, 'SELL', 'scalp', config.cooldown)) {
-          if (atr1m < config.minATR1m) {
-            console.log(`⛔ ${pair} SELL SCALP — skipped (ATR1m ${atr1m.toFixed(4)} < min ${config.minATR1m})`);
+        if (config.scalpEnabled) {
+          if (!scalp1m.pullbackValid) {
+            // silent — see BUY SCALP comment
+          } else if (sellScore.total < config.scalpMinScore) {
+            this._rejectLog({ pair, action: 'SELL', type: 'SCALP',
+                              score: sellScore.total, minScore: config.scalpMinScore,
+                              reason: 'below_threshold',
+                              breakdown: sellScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (this._inCooldown(pair, 'SELL', 'scalp', config.cooldown)) {
+            this._rejectLog({ pair, action: 'SELL', type: 'SCALP',
+                              score: sellScore.total, minScore: config.scalpMinScore,
+                              reason: 'cooldown',
+                              breakdown: sellScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
+          } else if (atr1m < config.minATR1m) {
+            this._rejectLog({ pair, action: 'SELL', type: 'SCALP',
+                              score: sellScore.total, minScore: config.scalpMinScore,
+                              reason: 'atr_too_low',
+                              notes: `atr1m=${atr1m.toFixed(4)} < min=${config.minATR1m}`,
+                              breakdown: sellScore.breakdown,
+                              macroTrend: macro.trend, mtfTrend: mtf.trend });
           } else {
             const entry = currentPrice;
             const sl = entry + (atr1m * 0.8);
@@ -199,46 +274,28 @@ export class MasterEngine {
 
     } catch (err) {
       console.error(`[${pair}] Analysis error:`, err.message);
+      this._rejectLog({ pair, reason: 'analysis_error', notes: err.message });
       return null;
     }
   }
 
   // ─── CONFLUENCE SCORING v2 ─────────────────────────────────────
-  // Max score = ~85 (clamp 100). New threshold = 62.
+  // Max score = ~85 (clamp 100). Thresholds: 52 (XAU/BTC/ETH), 58 (EUR).
   //
-  // v2 changes vs v1:
-  //  Component        v1 pts    v2 pts    Why
-  //  ─────────────────────────────────────────────────────────
-  //  Macro align      +20 free  removed   Always true, zero discriminative power
-  //  Macro ADX        +0/5/8    +0/4/8/12 Merged — now the only macro component
-  //  MTF 15m          +0/4/12   +2/4/6    Flattened — aligned ≈ neutral WR in data
-  //  5m signal        +10       +12       Promoted — actual signal timeframe
-  //  RSI              +0/4/8    +0/4/8    Tighter ranges
-  //  MACD             +8        +6        Reduced — lagging on 5m
-  //  Stoch            +6        +3        Reduced — noisy on 5m
-  //  CCI              +4        REMOVED   Free points, always passed
-  //  BB               +4        +0/5      Fixed — no more "or MIDDLE" freebie
-  //  News             +12/-8    +10/-10   Increased penalty (pipeline was dead)
-  //  Session          +0-15     +0-10     Capped lower, rebalanced
-  //  Patterns         +10/-6    +8/-6     Slight reduce
-  //  Direction bias   N/A       +5 SELL   NEW — SELL 48.7% vs BUY 44.4%
-  //  ─────────────────────────────────────────────────────────
-  //  Old max: 117     New max: ~85
+  // Scoring component weights — see MasterEngine.js v2 changelog for
+  // detailed rationale. Summary: macro free +20 removed, CCI removed,
+  // BB fixed, MTF flattened, SELL direction bias added, session capped.
   _scoreSignal({ action, macro, mtf, signal5m, scalp1m, patterns, newsBias, sessionBoost }) {
     const breakdown = {};
     let total = 0;
 
     // 1. Macro trend strength via ADX (max 12pts)
-    //    Replaces old free +20 alignment + separate ADX component.
-    //    Now: only earn points for STRONG trends.
     breakdown.macro = macro.adx > 35 ? 12 :
                       macro.adx > 28 ? 8  :
                       macro.adx > 22 ? 4  : 0;
     total += breakdown.macro;
 
     // 2. 15min MTF alignment (max 6pts) — FLATTENED
-    //    Data: aligned=45.9% WR, neutral=46.2% WR, opposing=76.9% WR (n=13)
-    //    Old 12/4/0 spread was not justified. Opposing gets small bonus.
     const mtfAligned = (action === 'BUY' && mtf.trend === 'BULLISH') ||
                        (action === 'SELL' && mtf.trend === 'BEARISH');
     const mtfOpposing = (action === 'BUY' && mtf.trend === 'BEARISH') ||
@@ -246,13 +303,13 @@ export class MasterEngine {
     breakdown.mtf = mtfAligned ? 6 : mtfOpposing ? 2 : 4;
     total += breakdown.mtf;
 
-    // 3. 5min signal aligned (max 12pts) — PROMOTED from 10
+    // 3. 5min signal aligned (max 12pts) — PROMOTED
     const signalAligned = (action === 'BUY' && signal5m.bias === 'BULLISH') ||
                           (action === 'SELL' && signal5m.bias === 'BEARISH');
     breakdown.signal5m = signalAligned ? 12 : 0;
     total += breakdown.signal5m;
 
-    // 4. RSI confirmation (max 8pts) — tighter ranges
+    // 4. RSI confirmation (max 8pts)
     if (action === 'BUY') {
       breakdown.rsi = (signal5m.rsi > 45 && signal5m.rsi < 60) ? 8 :
                       (signal5m.rsi > 35 && signal5m.rsi < 65) ? 4 : 0;
@@ -262,30 +319,27 @@ export class MasterEngine {
     }
     total += breakdown.rsi;
 
-    // 5. MACD confirmation (max 6pts) — reduced from 8
+    // 5. MACD confirmation (max 6pts)
     const macdAligned = (action === 'BUY' && signal5m.macdHist > 0) ||
                         (action === 'SELL' && signal5m.macdHist < 0);
     breakdown.macd = macdAligned ? 6 : 0;
     total += breakdown.macd;
 
-    // 6. Stochastic (max 3pts) — reduced from 6
+    // 6. Stochastic (max 3pts)
     const stochOk = (action === 'BUY' && signal5m.stochK < 75 && signal5m.stochK > signal5m.stochD) ||
                     (action === 'SELL' && signal5m.stochK > 25 && signal5m.stochK < signal5m.stochD);
     breakdown.stoch = stochOk ? 3 : 0;
     total += breakdown.stoch;
 
-    // 7. CCI — REMOVED (was +4 free points, range too wide, always passed)
+    // 7. CCI — REMOVED
 
     // 8. Bollinger Bands (max 5pts) — FIXED
-    //    Bug fix: removed "|| bbPosition === 'MIDDLE'" which gave free +4 ~80% of the time
     const bbEdge = (action === 'BUY' && signal5m.bbPosition === 'LOWER') ||
                    (action === 'SELL' && signal5m.bbPosition === 'UPPER');
     breakdown.bb = bbEdge ? 5 : 0;
     total += breakdown.bb;
 
     // 9. News bias (max 10pts / -10pts penalty)
-    //    NOTE: News pipeline was dead (always NEUTRAL) as of Apr 5 2026.
-    //    When fixed, this will provide real edge. Penalty increased.
     const newsAligned = (action === 'BUY' && ['BULLISH_GOLD', 'BULLISH', 'SLIGHT_BULLISH_GOLD', 'SLIGHT_BULLISH'].includes(newsBias)) ||
                         (action === 'SELL' && ['BEARISH_GOLD', 'BEARISH', 'SLIGHT_BEARISH_GOLD', 'SLIGHT_BEARISH'].includes(newsBias));
     const newsOpposite = (action === 'BUY' && ['BEARISH_GOLD', 'BEARISH'].includes(newsBias)) ||
@@ -293,11 +347,11 @@ export class MasterEngine {
     breakdown.news = newsAligned ? 10 : newsOpposite ? -10 : 0;
     total += breakdown.news;
 
-    // 10. Session boost (max 10pts) — CAPPED from 15
+    // 10. Session boost (max 10pts)
     breakdown.session = Math.min(sessionBoost, 10);
     total += breakdown.session;
 
-    // 11. Candle patterns (max 8pts / -6pts) — slightly reduced from 10
+    // 11. Candle patterns (max 8pts / -6pts)
     if (patterns) {
       const aligned  = action === 'BUY' ? patterns.bullishCount : patterns.bearishCount;
       const opposing = action === 'BUY' ? patterns.bearishCount : patterns.bullishCount;
@@ -308,9 +362,7 @@ export class MasterEngine {
     }
     total += breakdown.patterns;
 
-    // 12. Direction bias (max 5pts) — NEW
-    //     SELL: 48.7% WR vs BUY: 44.4% across 1,097 signals.
-    //     Consistent edge on XAU (+6.7%), BTC (+7.9%), ETH (+2.9%).
+    // 12. Direction bias (max 5pts) — SELL edge on XAU/BTC/ETH
     breakdown.directionBias = (action === 'SELL') ? 5 : 0;
     total += breakdown.directionBias;
 
@@ -532,9 +584,26 @@ export class MasterEngine {
     this.cooldowns.set(this._cooldownKey(pair, direction, type), Date.now());
   }
 
-  // ─── TWELVEDATA FETCHER ───────────────────────────────────────
+  // ─── CANDLE FETCHER — routes crypto to Binance ────────────────
   async _fetchCandles(pair, interval, outputSize = 100) {
+    // Crypto pairs → Binance (TwelveData free plan dropped ETH 1h)
+    if (BinanceClient.supports(pair)) {
+      try {
+        return await this.binanceClient.fetchCandles(pair, interval, outputSize);
+      } catch (err) {
+        // On Binance failure, fall back to TwelveData as last resort
+        console.warn(`⚠️  Binance failed for ${pair} ${interval}: ${err.message}. Falling back to TwelveData.`);
+        return this.tdClient.fetchCandles(pair, interval, outputSize);
+      }
+    }
+    // Forex pairs → TwelveData
     return this.tdClient.fetchCandles(pair, interval, outputSize);
+  }
+
+  // ─── REJECTION LOGGING (no-op if no logger) ──────────────────
+  _rejectLog(payload) {
+    if (!this.logger) return;
+    try { this.logger.log(payload); } catch (_) {}
   }
 
   _sleep(ms) {
